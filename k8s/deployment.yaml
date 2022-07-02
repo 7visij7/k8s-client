@@ -1,0 +1,38 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: devops
+  labels:
+    name: k8s-client
+    app: k8s-client
+  name: k8s-client
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-client
+  template:
+    metadata:
+      labels:
+        app: k8s-client
+        name: k8s-client
+    spec:
+      imagePullSecrets:
+      - name: company-registry
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      serviceAccount: k8s-client
+      serviceAccountName: k8s-client
+      containers:
+      - image: registry.company.com/k8s-company-client/k8s-company-client:latest
+        imagePullPolicy: Always
+        name: k8s-client
+        ports:
+        - containerPort: 80
+          name: http
+          protocol: TCP
+        envFrom:
+        - secretRef:
+           name: env-list

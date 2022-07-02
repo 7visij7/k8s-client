@@ -1,0 +1,5 @@
+requests
+kubernetes
+connexion
+tornado
+swagger-ui-bundle

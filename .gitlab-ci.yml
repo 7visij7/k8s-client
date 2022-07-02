@@ -1,0 +1,126 @@
+stages:
+  - build
+  - update_secret
+  - deploy
+
+variables:
+  VAULT_ADDR: https://vault.company.com
+  VAULT_ROLE: k8s-client-${ENVIRONMENT}-read
+  VAULT_PATH: /devops/k8s-client/${ENVIRONMENT}
+  KUBE_NAMESPACE: devops
+  SECRET_NAME: env-list
+  SECRET_FILE: .env
+  BUILD_IMAGE: registry.company.com/${CI_PROJECT_NAME}/${CI_PROJECT_NAME}:${CI_PIPELINE_ID}
+  DOCKER_HOST: tcp://localhost:2375
+  DOCKER_TLS_CERTDIR: ""
+build:
+  stage: build
+  image:
+    name: gcr.io/kaniko-project/executor:debug
+    entrypoint: [""]
+  before_script:
+    - mkdir -p ~/.docker
+    - echo "$DOCKER_AUTH_CONFIG" > ~/.docker/config.json
+  script:
+    - echo "$BUILD_IMAGE"
+    - /kaniko/executor --context $CI_PROJECT_DIR --dockerfile Dockerfile --destination $BUILD_IMAGE
+  tags:
+    - k8s-stage-gitlab
+  only:
+    - master
+
+.update_secret: &update_secret
+  stage: update_secret
+  image:
+    name: registry.company.com/kubectl
+    entrypoint: [""]
+  before_script:
+    - mkdir ~/.kube
+    - echo ${KUBE_CONFIG} | base64 -d > ~/.kube/config
+  script:
+    - export VAULT_TOKEN="$(vault write -field=token auth/jwt/login role=${VAULT_ROLE} jwt=$CI_JOB_JWT)"
+    - ./get_secret -path=${VAULT_PATH} -token=$VAULT_TOKEN > ${SECRET_FILE}
+    - kubectl delete secrets ${SECRET_NAME} -n ${KUBE_NAMESPACE} --ignore-not-found
+    - kubectl create secret generic ${SECRET_NAME} --from-env-file=${SECRET_FILE} -n ${KUBE_NAMESPACE} 
+
+update_secret:stage:
+  <<: *update_secret
+  variables:
+    KUBE_CONFIG: ${KUBE_CONFIG_STAGE}
+    ENVIRONMENT: stage
+  tags:
+    - k8s-stage-gitlab 
+  only:
+    - master
+
+update_secret:dev:
+  <<: *update_secret
+  variables:
+    KUBE_CONFIG: ${KUBE_CONFIG_DEV}
+    ENVIRONMENT: dev
+  tags:
+    - k8s-dev-gitlab 
+  only:
+    - master
+
+update_secret:production:
+  <<: *update_secret
+  variables:
+    KUBE_CONFIG: ${KUBE_CONFIG_PROD}
+    ENVIRONMENT: production
+  tags:
+    - k8s-prod-gitlab 
+  only:
+    - master
+
+.deploy_template: &deploy_template
+  stage: deploy
+  needs: 
+    - build
+    - update_secret:stage
+  image:
+    name: registry.company.com/kubectl
+    entrypoint: [""]
+  before_script:
+    - mkdir ~/.kube
+    - echo ${KUBE_CONFIG} | base64 -d > ~/.kube/config
+  script:
+    - kubectl apply -f k8s/
+    - kubectl set image deployment/${CI_PROJECT_NAME} -n ${KUBE_NAMESPACE} ${CI_PROJECT_NAME}=${BUILD_IMAGE} --record
+    - apk add gettext
+    - envsubst < "k8s-ingress.patch" > "${ENVIRONMENT}.patch"
+    - export patch=$(cat ${ENVIRONMENT}.patch)
+    - kubectl patch ingress ${CI_PROJECT_NAME} -n ${KUBE_NAMESPACE} --patch "$patch"    
+
+deploy:dev:
+  <<: *deploy_template
+  variables:
+    KUBE_CONFIG: ${KUBE_CONFIG_DEV}
+    INGRESS_NAME: dev-company.k8s
+  tags:
+    - k8s-stage-gitlab 
+  only:
+    refs:
+      - master
+
+deploy:stage:
+  <<: *deploy_template
+  variables:
+    KUBE_CONFIG: ${KUBE_CONFIG_STAGE}
+    INGRESS_NAME: stage-company.k8s
+  tags:
+    - k8s-stage-gitlab 
+  only:
+    refs:
+      - master
+
+deploy:production:
+  <<: *deploy_template
+  variables:
+    KUBE_CONFIG: ${KUBE_CONFIG_PROD}
+    INGRESS_NAME: company.k8s
+  tags:
+    - k8s-prod-gitlab 
+  only:
+    refs:
+      - master

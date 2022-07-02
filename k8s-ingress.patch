@@ -1,0 +1,13 @@
+spec:
+  rules:
+    - host: ${CI_PROJECT_NAME}.${INGRESS_NAME}
+      http:
+          paths:
+            - path: "/"
+              pathType: Prefix
+              backend:
+                service:
+                  name: ${CI_PROJECT_NAME}
+                  port:
+                    number: 80
+                    

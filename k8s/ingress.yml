@@ -1,0 +1,18 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k8s-client
+  namespace: devops
+spec:
+  rules:
+    - host: k8s-client.stage-company.k8s
+      http:
+          paths:
+            - path: "/"
+              pathType: Prefix
+              backend:
+                service:
+                  name: k8s-client
+                  port:
+                    number: 80
